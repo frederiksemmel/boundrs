@@ -1,9 +1,8 @@
-use alphanumeric_sort;
 use eframe::egui;
 use egui::*;
 use glob::glob;
 use std::collections::{HashMap, HashSet};
-use std::fs::{read_dir, File};
+use std::fs::File;
 use std::io::prelude::*;
 use std::path::PathBuf;
 
@@ -39,10 +38,22 @@ enum Class {
 
 impl Class {
     fn color(self) -> Color32 {
-        let hue = self as usize as f32 / 12.0 * 360.0;
-        let color = Lch::new(100.0, 128.0, hue);
-        let (r, g, b) = Srgb::from_color(color).into_components();
-        Color32::from_rgb((r * 256.0) as u8, (g * 256.0) as u8, (b * 256.0) as u8)
+        use Class::*;
+        match self {
+            A => Color32::from_rgb(0x2f, 0x4f, 0x4f),
+            K => Color32::from_rgb(0x8b, 0x45, 0x13),
+            Q => Color32::from_rgb(0x00, 0x80, 0x00),
+            J => Color32::from_rgb(0x4b, 0x00, 0x82),
+            V10 => Color32::from_rgb(0xff, 0x00, 0x00),
+            V9 => Color32::from_rgb(0xff, 0xff, 0x00),
+            V8 => Color32::from_rgb(0x00, 0xff, 0x00),
+            V7 => Color32::from_rgb(0x00, 0xff, 0xff),
+            V6 => Color32::from_rgb(0x00, 0x00, 0xff),
+            V5 => Color32::from_rgb(0xff, 0x00, 0xff),
+            V4 => Color32::from_rgb(0x64, 0x95, 0xed),
+            V3 => Color32::from_rgb(0xff, 0xda, 0xb9),
+            V2 => Color32::from_rgb(0xff, 0x69, 0xb6),
+        }
     }
 
     fn shortcuts() -> HashMap<Key, Class> {
@@ -80,6 +91,25 @@ impl Class {
             11 => V3,
             12 => V2,
             _ => unreachable!(),
+        }
+    }
+
+    fn to_name(self) -> &'static str {
+        use Class::*;
+        match self {
+            A => "A",
+            K => "K",
+            Q => "Q",
+            J => "J",
+            V10 => "10",
+            V9 => "9",
+            V8 => "8",
+            V7 => "7",
+            V6 => "6",
+            V5 => "5",
+            V4 => "4",
+            V3 => "3",
+            V2 => "2",
         }
     }
 }
@@ -159,8 +189,6 @@ struct Label {
     class: Class,
     rect: Rect,
 }
-
-use palette::{FromColor, Lch, Srgb};
 
 impl Label {
     fn from_pos(class: Class, pos1: Pos2, pos2: Pos2) -> Self {
@@ -359,11 +387,29 @@ impl MyApp {
         };
     }
 
+    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: Class) {
+        painter.rect(
+            Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
+            Rounding::none(),
+            class.color(),
+            Stroke::none(),
+        );
+        let _text_rect = painter.text(
+            text_pos,
+            Align2::LEFT_BOTTOM,
+            class.to_name(),
+            FontId::monospace(35.0),
+            Color32::BLACK,
+        );
+    }
+
     fn draw_bbs(&self, ui: &mut Ui) {
         let painter = ui.painter();
         for label in &self.dataset.current_labels {
             let color = label.class.color();
             painter.rect_stroke(label.rect, Rounding::none(), Stroke::new(2.0, color));
+            let text_pos = label.rect.left_bottom();
+            self.draw_label_text(painter, text_pos, label.class);
         }
     }
 
@@ -375,6 +421,7 @@ impl MyApp {
         let stroke = egui::Stroke::new(2.0, color);
         painter.hline(0.0..=w_size.x, pos.y, stroke);
         painter.vline(pos.x, 0.0..=w_size.y, stroke);
+        self.draw_label_text(painter, pos, self.current_class);
     }
 
     fn draw_partial_box(&self, ui: &mut Ui) {
