@@ -212,6 +212,8 @@ struct Dataset {
     current_labels: Vec<Label>,
 }
 
+use image::{Rgba, RgbaImage};
+
 fn load_image_from_path(path: &std::path::Path) -> Result<egui::ColorImage, image::ImageError> {
     let image = image::io::Reader::open(path)?.decode()?;
     let size = [image.width() as _, image.height() as _];
@@ -226,13 +228,8 @@ fn load_image_from_path(path: &std::path::Path) -> Result<egui::ColorImage, imag
 impl Dataset {
     fn from_input_dir() -> Self {
         let mut data = vec![];
-        // let images_dir = PathBuf::from("./input");
         let labels_dir = PathBuf::from("./input");
         let mut paths: Vec<_> = glob("./input/*.jpg").unwrap().map(|p| p.unwrap()).collect();
-        // let mut paths: Vec<_> = read_dir(images_dir)
-        //     .unwrap()
-        //     .map(|r| r.unwrap().path())
-        //     .collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.iter() {
             data.push(Datapoint {
@@ -254,8 +251,6 @@ impl Dataset {
             "Starting at index {first_no_label} with img_src {:?}",
             data[first_no_label]
         );
-        // let image_stems: HashSet<_> = paths.iter().map(|p| p.file_stem()).collect();
-        // let label_stems: HashSet<_> =
 
         Dataset {
             labels_dir,
@@ -311,6 +306,23 @@ impl Dataset {
         println!("Previous image, now on: {}", self.i);
         self.i = self.i.saturating_sub(1);
     }
+    fn pos_inside_label_box(&self, pos: Pos2) -> bool {
+        self.current_labels.iter().any(|l| l.rect.contains(pos))
+    }
+    fn generate_mask(&self) -> egui::ColorImage {
+        let size: [usize; 2] = [1920, 1080];
+        let mask = RgbaImage::from_fn(1920, 1080, |x, y| {
+            let pos = Pos2::new(x as f32, y as f32);
+            if self.pos_inside_label_box(pos) {
+                Rgba([0, 0, 0, 0])
+            } else {
+                Rgba([0, 0, 0, 250])
+            }
+        });
+        // let image_buffer = mask.to_rgba8();
+        let pixels = mask.as_flat_samples();
+        egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -322,6 +334,7 @@ enum BBoxInput {
 
 struct MyApp {
     texture: Option<egui::TextureHandle>,
+    mask: Option<egui::TextureHandle>,
     bbox_input: BBoxInput,
     dataset: Dataset,
     current_class: Class,
@@ -331,6 +344,7 @@ impl Default for MyApp {
     fn default() -> Self {
         Self {
             texture: None,
+            mask: None,
             bbox_input: BBoxInput::None,
             dataset: Dataset::from_input_dir(),
             current_class: Class::V2,
@@ -445,6 +459,13 @@ impl MyApp {
             .load_texture("my-image", image, egui::TextureFilter::Linear);
         self.texture = Some(texture);
     }
+    fn update_mask(&mut self, ui: &mut Ui) {
+        let mask = self.dataset.generate_mask();
+        let texture = ui
+            .ctx()
+            .load_texture("mask", mask, egui::TextureFilter::Linear);
+        self.mask = Some(texture);
+    }
 }
 
 impl eframe::App for MyApp {
@@ -458,9 +479,20 @@ impl eframe::App for MyApp {
                     self.dataset.load_labels(self.get_img_size());
                 }
                 let texture = self.texture.clone().unwrap();
+
+                let mask: &TextureHandle = self.mask.get_or_insert_with(|| {
+                    let mask = self.dataset.generate_mask();
+                    let texture = ui
+                        .ctx()
+                        .load_texture("mask", mask, egui::TextureFilter::Linear);
+                    texture
+                });
                 let img_response = ui.add(
                     egui::Image::new(&texture, texture.size_vec2()).sense(Sense::click_and_drag()),
                 );
+                let screen_rect = ui.max_rect();
+                ui.put(screen_rect, egui::Image::new(mask, mask.size_vec2()));
+                // ui.image(mask, mask.size_vec2());
 
                 // Handle clicks for bbs
                 self.handle_img_response(img_response, ui);
@@ -483,6 +515,7 @@ impl eframe::App for MyApp {
                     self.dataset.next();
                     self.update_texture(ui);
                     self.dataset.load_labels(self.get_img_size());
+                    self.update_mask(ui);
                 }
                 let previous_pressed = ctx.input().key_pressed(egui::Key::ArrowLeft)
                     | ctx.input().key_pressed(egui::Key::A);
@@ -491,6 +524,7 @@ impl eframe::App for MyApp {
                     self.dataset.previous();
                     self.update_texture(ui);
                     self.dataset.load_labels(self.get_img_size());
+                    self.update_mask(ui);
                 }
 
                 // Handle class setting
