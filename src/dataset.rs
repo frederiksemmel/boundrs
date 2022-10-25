@@ -1,10 +1,11 @@
 use crate::egui::*;
+use anyhow::{Error, Result};
 use glob::glob;
-use image::ImageError;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Class {
@@ -110,26 +111,30 @@ struct YoloLabel {
     h: f32,
 }
 
-impl YoloLabel {
-    // TODO implement FromStr and AsStr I guess
-    fn as_string(self) -> String {
-        format!(
-            "{} {} {} {} {}",
-            self.class_num, self.x, self.y, self.w, self.h
-        )
-    }
-    fn from_str(yolo_str: &str) -> Self {
-        let parts: Vec<_> = yolo_str.split(' ').collect();
-        let class_num: usize = parts[0].parse().unwrap();
-        let (x, y) = (parts[1].parse().unwrap(), parts[2].parse().unwrap());
-        let (w, h) = (parts[3].parse().unwrap(), parts[4].parse().unwrap());
-        Self {
+impl FromStr for YoloLabel {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let parts: Vec<_> = s.split(' ').collect();
+        let class_num: usize = parts[0].parse()?;
+        let (x, y) = (parts[1].parse()?, parts[2].parse()?);
+        let (w, h) = (parts[3].parse()?, parts[4].parse()?);
+        Ok(Self {
             class_num,
             x,
             y,
             w,
             h,
-        }
+        })
+    }
+}
+
+impl YoloLabel {
+    fn as_string(self) -> String {
+        format!(
+            "{} {} {} {} {}",
+            self.class_num, self.x, self.y, self.w, self.h
+        )
     }
 }
 
@@ -206,10 +211,10 @@ fn load_image_from_path(
 }
 
 impl Dataset {
-    pub fn from_input_dir() -> Self {
+    pub fn from_input_dir() -> Result<Self> {
         let mut data = vec![];
         let labels_dir = PathBuf::from("./input");
-        let mut paths: Vec<_> = glob("./input/*.jpg").unwrap().map(|p| p.unwrap()).collect();
+        let mut paths: Vec<_> = glob("./input/*.jpg")?.map(|p| p.unwrap()).collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.iter() {
             data.push(Datapoint {
@@ -232,37 +237,41 @@ impl Dataset {
             data[first_no_label]
         );
 
-        Dataset {
+        Ok(Dataset {
             labels_dir,
             data,
             i: first_no_label,
             current_labels: vec![],
-        }
+        })
     }
 
-    pub fn current_image(&mut self) -> Result<ColorImage, ImageError> {
+    pub fn current_image(&mut self) -> Result<ColorImage> {
         let path = &self.data[self.i].img_src;
         let (image, size) = load_image_from_path(path)?;
         let image_size = Vec2::from([size[0] as f32, size[1] as f32]);
-        self.load_labels(self.i, image_size);
+        let yolo_labels = self.load_labels(self.i)?;
+        // TODO maybe move all stuff related to image size to app / ui code
+        // then dataset would only know YoloLabel, cleaner
+        self.current_labels = yolo_labels
+            .into_iter()
+            .map(|l| (image_size, l).into())
+            .collect();
         Ok(image)
     }
 
-    fn load_labels(&mut self, i: usize, img_size: Vec2) {
+    fn load_labels(&mut self, i: usize) -> Result<Vec<YoloLabel>> {
         let img_filename = self.data[i].img_src.file_name().unwrap();
         let mut label_path = self.labels_dir.clone();
         label_path.push(img_filename);
         label_path.set_extension("txt");
-        let yolo_strs = match std::fs::read_to_string(&label_path) {
-            Ok(yolo_labels) => yolo_labels,
-            Err(_) => return,
-        };
+        let yolo_strs = std::fs::read_to_string(&label_path)?;
 
-        self.current_labels = yolo_strs
-            .lines()
-            .map(YoloLabel::from_str)
-            .map(|yolo_label| (img_size, yolo_label).into())
-            .collect();
+        let mut labels = vec![];
+        for line in yolo_strs.lines() {
+            let label = YoloLabel::from_str(line)?;
+            labels.push(label)
+        }
+        Ok(labels)
     }
     pub fn remove_labels(&mut self, pos: Pos2) {
         self.current_labels
@@ -313,7 +322,12 @@ impl Dataset {
         ColorImage::from_rgba_unmultiplied(size, pixels.as_slice())
     }
 
-    pub fn repeat_bbs(&mut self, img_size: Vec2) {
-        self.load_labels(usize::saturating_sub(self.i, 1), img_size);
+    pub fn repeat_bbs(&mut self, img_size: Vec2) -> Result<()> {
+        let yolo_labels = self.load_labels(usize::saturating_sub(self.i, 1))?;
+        self.current_labels = yolo_labels
+            .into_iter()
+            .map(|l| (img_size, l).into())
+            .collect();
+        Ok(())
     }
 }

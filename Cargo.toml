@@ -12,3 +12,4 @@ image = { version = "0.24", default-features = false, features = ["jpeg"] }
 palette = "*"
 alphanumeric-sort = "*"
 glob = "*"
+anyhow = "*"

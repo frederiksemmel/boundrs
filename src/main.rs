@@ -44,7 +44,7 @@ impl Default for MyApp {
             texture: None,
             mask: None,
             bbox_input: BBoxInput::None,
-            dataset: Dataset::from_input_dir(),
+            dataset: Dataset::from_input_dir().unwrap(),
             current_class: Class::V2,
             image_rect: Rect::NOTHING,
             filter: false,
@@ -76,7 +76,7 @@ impl MyApp {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             let pos = self.to_img_coordinates(screen_pos);
             self.remove_bbs(pos);
-            self.update_mask(ui);
+            self.update_mask(ui.ctx());
         }
 
         // secondary click also regiesters a drag, therefore early return
@@ -109,7 +109,7 @@ impl MyApp {
                 };
                 println!("{:?}", label);
                 self.dataset.add_label(label);
-                self.update_mask(ui);
+                self.update_mask(ui.ctx());
                 BBoxInput::None
             }
         };
@@ -180,12 +180,23 @@ impl MyApp {
             .load_texture("my-image", image, egui::TextureFilter::Linear);
         self.texture = Some(texture);
     }
-    fn update_mask(&mut self, ui: &mut Ui) {
+    fn update_mask(&mut self, ctx: &Context) {
         let mask = self.dataset.generate_mask(&self.shown_classes);
-        let texture = ui
-            .ctx()
-            .load_texture("mask", mask, egui::TextureFilter::Linear);
+        let texture = ctx.load_texture("mask", mask, egui::TextureFilter::Linear);
         self.mask = Some(texture);
+    }
+
+    fn handle_class_keys(&mut self, ctx: &Context) {
+        let class = self.class_pressed(ctx);
+        if let Some(class) = class {
+            if self.filter {
+                let is_shown = self.shown_classes.entry(class).or_insert(false);
+                *is_shown = !*is_shown;
+                self.update_mask(ctx);
+            } else {
+                self.current_class = class;
+            }
+        }
     }
 }
 
@@ -237,7 +248,7 @@ impl eframe::App for MyApp {
                     self.dataset.save_labels(self.get_img_size());
                     self.dataset.next();
                     self.update_texture(ui);
-                    self.update_mask(ui);
+                    self.update_mask(ctx);
                 }
                 let previous_pressed = ctx.input().key_pressed(egui::Key::ArrowLeft)
                     | ctx.input().key_pressed(egui::Key::A);
@@ -245,21 +256,11 @@ impl eframe::App for MyApp {
                     // self.dataset.save_labels(self.get_img_size());
                     self.dataset.previous();
                     self.update_texture(ui);
-                    self.update_mask(ui);
+                    self.update_mask(ctx);
                 }
 
                 // Handle class setting
-                // TODO refactor
-                let class = self.class_pressed(ctx);
-                if let Some(class) = class {
-                    if self.filter {
-                        let is_shown = self.shown_classes.entry(class).or_insert(false);
-                        *is_shown = !*is_shown;
-                        self.update_mask(ui);
-                    } else {
-                        self.current_class = class;
-                    }
-                }
+                self.handle_class_keys(ctx);
 
                 // Handle filter mode
                 let filter_pressed = ctx.input().key_pressed(egui::Key::F);
@@ -269,7 +270,7 @@ impl eframe::App for MyApp {
 
                 // Handle repeat button
                 if ctx.input().key_pressed(egui::Key::R) {
-                    self.dataset.repeat_bbs(self.get_img_size());
+                    self.dataset.repeat_bbs(self.get_img_size()).unwrap();
                 }
             });
     }
