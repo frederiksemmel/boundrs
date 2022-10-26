@@ -273,6 +273,16 @@ impl Dataset {
         }
         Ok(labels)
     }
+
+    fn get_filename(&self, i: usize) -> PathBuf {
+        self.data[i].img_src.clone()
+    }
+    pub fn get_current_filename(&self) -> PathBuf {
+        self.get_filename(self.i)
+    }
+    pub fn get_progress(&self) -> (usize, usize, usize) {
+        (0, self.i, self.data.len())
+    }
     pub fn remove_labels(&mut self, pos: Pos2) {
         self.current_labels
             .retain(|label| !label.rect.contains(pos));
@@ -282,7 +292,6 @@ impl Dataset {
     }
 
     pub fn next(&mut self) {
-        println!("Next image, now on: {}", self.i);
         self.i = std::cmp::min(self.i + 1, self.data.len() - 1);
     }
     pub fn save_labels(&mut self, img_size: Vec2) {
@@ -294,12 +303,11 @@ impl Dataset {
         let mut file = File::create(&label_path).unwrap();
         for label in &self.current_labels {
             let yolo_label: YoloLabel = (img_size, *label).into();
-            println!("Saving label {label_path:?}");
             writeln!(file, "{}", yolo_label.as_string()).unwrap();
         }
+        println!("Saving labels to {label_path:?}");
     }
     pub fn previous(&mut self) {
-        println!("Previous image, now on: {}", self.i);
         self.i = self.i.saturating_sub(1);
     }
     fn pos_inside_label_box(&self, pos: Pos2, shown_classes: &HashMap<Class, bool>) -> bool {

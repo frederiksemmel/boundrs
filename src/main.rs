@@ -173,11 +173,9 @@ impl MyApp {
         None
     }
 
-    fn update_texture(&mut self, ui: &mut Ui) {
+    fn update_texture(&mut self, ctx: &Context) {
         let image = self.dataset.current_image().unwrap();
-        let texture = ui
-            .ctx()
-            .load_texture("my-image", image, egui::TextureFilter::Linear);
+        let texture = ctx.load_texture("my-image", image, egui::TextureFilter::Linear);
         self.texture = Some(texture);
     }
     fn update_mask(&mut self, ctx: &Context) {
@@ -198,16 +196,47 @@ impl MyApp {
             }
         }
     }
+
+    fn handle_left_right(&mut self, ctx: &Context) {
+        let next_pressed =
+            ctx.input().key_pressed(egui::Key::ArrowRight) | ctx.input().key_pressed(egui::Key::D);
+        if next_pressed {
+            self.dataset.save_labels(self.get_img_size());
+            self.dataset.next();
+            self.update_texture(ctx);
+            self.update_mask(ctx);
+        }
+        let previous_pressed =
+            ctx.input().key_pressed(egui::Key::ArrowLeft) | ctx.input().key_pressed(egui::Key::A);
+        if previous_pressed {
+            // self.dataset.save_labels(self.get_img_size());
+            self.dataset.previous();
+            self.update_texture(ctx);
+            self.update_mask(ctx);
+        }
+    }
 }
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
+            let filename = self.dataset.get_current_filename();
+            let filename = filename.to_str().unwrap_or("None");
+            ui.label(format!("Current img source: {}", filename));
+
+            let (_, current, max) = self.dataset.get_progress();
+            ui.add(
+                ProgressBar::new(current as f32 / max as f32)
+                    .show_percentage()
+                    .text(format!("{current} out of {max} images")),
+            );
+        });
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 // Draw image
                 if self.texture.is_none() {
-                    self.update_texture(ui);
+                    self.update_texture(ctx);
                 }
                 let texture = self.texture.clone().unwrap();
 
@@ -217,6 +246,7 @@ impl eframe::App for MyApp {
                 self.image_rect = img_response.rect;
 
                 // filter with mask
+                // TODO find better way to do this
                 if self.filter {
                     let mask: &TextureHandle = self.mask.get_or_insert_with(|| {
                         let mask = self.dataset.generate_mask(&self.shown_classes);
@@ -228,9 +258,6 @@ impl eframe::App for MyApp {
                     ui.put(self.image_rect, egui::Image::new(mask, mask.size_vec2()));
                 }
 
-                // Handle clicks for bbs
-                self.handle_img_response(img_response, ui);
-
                 // Draw guides
                 let pos = ctx.input().pointer.hover_pos();
                 if let Some(pos) = pos {
@@ -241,23 +268,13 @@ impl eframe::App for MyApp {
                 // Draw bbs
                 self.draw_bbs(ui);
 
+                // Draw info window
+
+                // Handle clicks for bbs
+                self.handle_img_response(img_response, ui);
+
                 // Handle prev next picture keyboard
-                let next_pressed = ctx.input().key_pressed(egui::Key::ArrowRight)
-                    | ctx.input().key_pressed(egui::Key::D);
-                if next_pressed {
-                    self.dataset.save_labels(self.get_img_size());
-                    self.dataset.next();
-                    self.update_texture(ui);
-                    self.update_mask(ctx);
-                }
-                let previous_pressed = ctx.input().key_pressed(egui::Key::ArrowLeft)
-                    | ctx.input().key_pressed(egui::Key::A);
-                if previous_pressed {
-                    // self.dataset.save_labels(self.get_img_size());
-                    self.dataset.previous();
-                    self.update_texture(ui);
-                    self.update_mask(ctx);
-                }
+                self.handle_left_right(ctx);
 
                 // Handle class setting
                 self.handle_class_keys(ctx);
