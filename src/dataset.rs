@@ -205,6 +205,9 @@ impl Datapoint {
         load_image_from_path(&self.img_src)
     }
     fn load_label(&self) -> Result<YoloLabel> {
+        if !self.label_src.exists() {
+            File::create(&self.label_src).unwrap();
+        }
         let yolo_strs = std::fs::read_to_string(&self.label_src)?;
 
         let mut labels = vec![];

@@ -305,7 +305,7 @@ impl eframe::App for MyApp {
             });
         });
         egui::CentralPanel::default()
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::none().fill(Color32::BLACK))
             .show(ctx, |ui| {
                 // Draw image
                 let img_response = ui.add(
