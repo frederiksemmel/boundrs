@@ -1,11 +1,11 @@
+use anyhow::Result;
 use eframe::egui;
 use egui::*;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 mod dataset;
-use crate::dataset::Class;
-use dataset::Dataset;
-use dataset::MyLabel;
+use dataset::{BoundingBox, Class, Dataset, DatasetMovement, YoloBB, YoloLabel};
+use image::{Rgba, RgbaImage};
 
 fn main() {
     let options = eframe::NativeOptions {
@@ -16,7 +16,7 @@ fn main() {
     eframe::run_native(
         "Show an image with eframe/egui",
         options,
-        Box::new(|_cc| Box::new(MyApp::default())),
+        Box::new(|cc| Box::new(MyApp::new(cc))),
     );
 }
 
@@ -28,47 +28,102 @@ enum BBoxInput {
 }
 
 struct MyApp {
-    texture: Option<egui::TextureHandle>,
-    mask: Option<egui::TextureHandle>,
+    image_texture: egui::TextureHandle,
+    mask_texture: egui::TextureHandle,
     bbox_input: BBoxInput,
     dataset: Dataset,
     current_class: Class,
     image_rect: Rect,
     filter: bool,
-    shown_classes: HashMap<Class, bool>,
+    filter_opacity: u8,
+    shown_classes: HashSet<Class>,
+    current_label: YoloLabel,
 }
 
-impl Default for MyApp {
-    fn default() -> Self {
+impl MyApp {
+    // TODO error handling
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let dataset = Dataset::from_input_dir().unwrap();
+        let image = dataset.current_image().unwrap();
+        let image_texture =
+            cc.egui_ctx
+                .load_texture("my-image", image, egui::TextureFilter::Linear);
+        let size = image_texture.size_vec2();
+        let current_bbs = dataset.current_label().unwrap();
+        let shown_classes = HashSet::new();
+        let filter_opacity = 250;
+        let mask = generate_mask(&current_bbs, &shown_classes, size, filter_opacity);
+        let mask_texture = cc
+            .egui_ctx
+            .load_texture("mask", mask, egui::TextureFilter::Linear);
+
         Self {
-            texture: None,
-            mask: None,
+            image_texture,
+            mask_texture,
             bbox_input: BBoxInput::None,
             dataset: Dataset::from_input_dir().unwrap(),
             current_class: Class::V2,
             image_rect: Rect::NOTHING,
             filter: false,
-            shown_classes: HashMap::new(),
+            filter_opacity,
+            shown_classes,
+            current_label: current_bbs,
         }
     }
 }
-impl MyApp {
-    fn get_img_size(&self) -> Vec2 {
-        match &self.texture {
-            Some(t) => t.size_vec2(),
-            None => unreachable!(),
+
+fn pos_inside_label_box(label: &YoloLabel, pos: Pos2, size: Vec2) -> bool {
+    label.iter().any(|l| l.rect(size).contains(pos))
+}
+fn generate_mask(
+    label: &YoloLabel,
+    shown_classes: &HashSet<Class>,
+    size: Vec2,
+    opacity: u8,
+) -> ColorImage {
+    let highlighted_label = label
+        .iter()
+        .cloned()
+        .filter(|bb| shown_classes.contains(&bb.class()))
+        .collect();
+    let width = size.x as usize;
+    let height = size.y as usize;
+    let mask = RgbaImage::from_fn(width as u32, height as u32, |x, y| {
+        let pos = Pos2::new(x as f32, y as f32);
+        if pos_inside_label_box(&highlighted_label, pos, size) {
+            Rgba([0, 0, 0, 0])
+        } else {
+            Rgba([0, 0, 0, opacity])
         }
-    }
+    });
+    let pixels = mask.as_flat_samples();
+    ColorImage::from_rgba_unmultiplied([width, height], pixels.as_slice())
+}
 
-    fn remove_bbs(&mut self, pos: Pos2) {
-        self.dataset.remove_labels(pos);
-    }
-
+impl MyApp {
     fn to_img_coordinates(&self, pos: Pos2) -> Pos2 {
         (pos - self.image_rect.left_top()).to_pos2()
     }
     fn to_screen_coordinates(&self, pos: Pos2) -> Pos2 {
         pos + self.image_rect.left_top().to_vec2()
+    }
+
+    pub fn remove_labels(&mut self, pos: Pos2) {
+        let size = self.image_texture.size_vec2();
+        self.current_label
+            .retain(|label| !label.rect(size).contains(pos));
+    }
+    pub fn add_bb(&mut self, bb: YoloBB) {
+        self.current_label.push(bb)
+    }
+
+    pub fn repeat_bbs(&mut self) -> Result<()> {
+        let yolo_label = self.dataset.previous_label()?;
+        self.current_label = yolo_label;
+        Ok(())
+    }
+    fn remove_bbs(&mut self, pos: Pos2) {
+        self.remove_labels(pos);
     }
 
     fn handle_img_response(&mut self, img_response: Response, ui: &mut Ui) {
@@ -103,18 +158,18 @@ impl MyApp {
             BBoxInput::Partial(pos1) => BBoxInput::Partial(pos1),
             BBoxInput::Finished(pos1, pos2) => {
                 let class = self.current_class;
-                let label = MyLabel {
+                let label = YoloBB::from_rect(
+                    Rect::from_two_pos(pos1, pos2),
+                    self.image_texture.size_vec2(),
                     class,
-                    rect: Rect::from_two_pos(pos1, pos2),
-                };
+                );
                 println!("{:?}", label);
-                self.dataset.add_label(label);
+                self.add_bb(label);
                 self.update_mask(ui.ctx());
                 BBoxInput::None
             }
         };
     }
-
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: Class) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
@@ -130,22 +185,22 @@ impl MyApp {
             Color32::BLACK,
         );
     }
-
     fn draw_bbs(&self, ui: &mut Ui) {
         let painter = ui.painter();
-        for label in &self.dataset.current_labels {
-            let color = label.class.color();
+        let size = self.image_rect.size();
+        for bb in &self.current_label {
+            let color = bb.class().color();
+            // TODO improve
             let screen_rect = [
-                self.to_screen_coordinates(label.rect.left_top()),
-                self.to_screen_coordinates(label.rect.right_bottom()),
+                self.to_screen_coordinates(bb.rect(size).left_top()),
+                self.to_screen_coordinates(bb.rect(size).right_bottom()),
             ]
             .into();
             painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
-            self.draw_label_text(painter, text_pos, label.class);
+            self.draw_label_text(painter, text_pos, bb.class());
         }
     }
-
     fn draw_guide(&self, ui: &mut Ui, pos: Pos2) {
         let painter = ui.painter();
         let rect = ui.clip_rect();
@@ -156,7 +211,6 @@ impl MyApp {
         painter.vline(pos.x, 0.0..=w_size.y, stroke);
         self.draw_label_text(painter, pos, self.current_class);
     }
-
     fn draw_partial_box(&self, ui: &mut Ui) {
         if let BBoxInput::Partial(pos) = self.bbox_input {
             let screen_pos = self.to_screen_coordinates(pos);
@@ -164,98 +218,108 @@ impl MyApp {
         }
     }
 
-    fn class_pressed(&self, ctx: &Context) -> Option<Class> {
-        for (key, class) in Class::shortcuts() {
-            if ctx.input().key_pressed(key) {
-                return Some(class);
-            }
-        }
-        None
-    }
-
     fn update_texture(&mut self, ctx: &Context) {
         let image = self.dataset.current_image().unwrap();
-        let texture = ctx.load_texture("my-image", image, egui::TextureFilter::Linear);
-        self.texture = Some(texture);
+        self.image_texture = ctx.load_texture("my-image", image, egui::TextureFilter::Linear);
     }
     fn update_mask(&mut self, ctx: &Context) {
-        let mask = self.dataset.generate_mask(&self.shown_classes);
-        let texture = ctx.load_texture("mask", mask, egui::TextureFilter::Linear);
-        self.mask = Some(texture);
+        let mask = generate_mask(
+            &self.current_label,
+            &self.shown_classes,
+            self.image_texture.size_vec2(),
+            self.filter_opacity,
+        );
+        self.mask_texture = ctx.load_texture("mask", mask, egui::TextureFilter::Linear);
+    }
+
+    fn classes_pressed(&self, ctx: &Context) -> HashSet<Class> {
+        let mut classes = HashSet::new();
+        for (key, class) in Class::shortcuts() {
+            if ctx.input().key_pressed(key) {
+                classes.insert(class);
+            }
+        }
+        classes
     }
 
     fn handle_class_keys(&mut self, ctx: &Context) {
-        let class = self.class_pressed(ctx);
-        if let Some(class) = class {
-            if self.filter {
-                let is_shown = self.shown_classes.entry(class).or_insert(false);
-                *is_shown = !*is_shown;
-                self.update_mask(ctx);
-            } else {
-                self.current_class = class;
-            }
+        let classes = self.classes_pressed(ctx);
+        if self.filter {
+            self.shown_classes = self
+                .shown_classes
+                .symmetric_difference(&classes)
+                .copied()
+                .collect();
+            self.update_mask(ctx);
+        } else if let Some(class) = classes.into_iter().next() {
+            self.current_class = class;
         }
     }
 
     fn handle_left_right(&mut self, ctx: &Context) {
         let next_pressed =
             ctx.input().key_pressed(egui::Key::ArrowRight) | ctx.input().key_pressed(egui::Key::D);
-        if next_pressed {
-            self.dataset.save_labels(self.get_img_size());
-            self.dataset.next();
-            self.update_texture(ctx);
-            self.update_mask(ctx);
-        }
         let previous_pressed =
             ctx.input().key_pressed(egui::Key::ArrowLeft) | ctx.input().key_pressed(egui::Key::A);
-        if previous_pressed {
-            // self.dataset.save_labels(self.get_img_size());
-            self.dataset.previous();
-            self.update_texture(ctx);
-            self.update_mask(ctx);
-        }
+
+        let movement = match (next_pressed, previous_pressed, self.filter) {
+            (true, false, false) => DatasetMovement::Next,
+            (false, true, false) => DatasetMovement::Previous,
+            (true, false, true) => DatasetMovement::NextContaining(&self.shown_classes),
+            (false, true, true) => DatasetMovement::PreviousContaining(&self.shown_classes),
+            _ => return,
+        };
+        self.dataset
+            .go(movement, self.current_label.clone())
+            .unwrap();
+        self.current_label = self.dataset.current_label().unwrap();
+        self.update_texture(ctx);
+        self.update_mask(ctx);
     }
 }
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
-            let filename = self.dataset.get_current_filename();
-            let filename = filename.to_str().unwrap_or("None");
-            ui.label(format!("Current img source: {}", filename));
-
-            let (_, current, max) = self.dataset.get_progress();
-            ui.add(
-                ProgressBar::new(current as f32 / max as f32)
-                    .show_percentage()
-                    .text(format!("{current} out of {max} images")),
-            );
+            let filename = self.dataset.current_name();
+            ui.horizontal(|ui| {
+                ui.label("Current image:");
+                ui.label(filename);
+            });
+            ui.horizontal(|ui| {
+                ui.label("Progress");
+                let (_, current, max) = self.dataset.get_progress();
+                ui.add(
+                    ProgressBar::new(current as f32 / max as f32)
+                        .show_percentage()
+                        .text(format!("{current} out of {max} images")),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label("Filter opacity");
+                ui.add(Slider::new(&mut self.filter_opacity, 0..=255));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Shown classes:");
+                ui.label(format!("{:?}", self.shown_classes));
+            });
         });
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 // Draw image
-                if self.texture.is_none() {
-                    self.update_texture(ctx);
-                }
-                let texture = self.texture.clone().unwrap();
-
                 let img_response = ui.add(
-                    egui::Image::new(&texture, texture.size_vec2()).sense(Sense::click_and_drag()),
+                    egui::Image::new(&self.image_texture, self.image_texture.size_vec2())
+                        .sense(Sense::click_and_drag()),
                 );
                 self.image_rect = img_response.rect;
 
                 // filter with mask
-                // TODO find better way to do this
                 if self.filter {
-                    let mask: &TextureHandle = self.mask.get_or_insert_with(|| {
-                        let mask = self.dataset.generate_mask(&self.shown_classes);
-                        let texture =
-                            ui.ctx()
-                                .load_texture("mask", mask, egui::TextureFilter::Linear);
-                        texture
-                    });
-                    ui.put(self.image_rect, egui::Image::new(mask, mask.size_vec2()));
+                    ui.put(
+                        self.image_rect,
+                        egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
+                    );
                 }
 
                 // Draw guides
@@ -267,8 +331,6 @@ impl eframe::App for MyApp {
 
                 // Draw bbs
                 self.draw_bbs(ui);
-
-                // Draw info window
 
                 // Handle clicks for bbs
                 self.handle_img_response(img_response, ui);
@@ -287,7 +349,7 @@ impl eframe::App for MyApp {
 
                 // Handle repeat button
                 if ctx.input().key_pressed(egui::Key::R) {
-                    self.dataset.repeat_bbs(self.get_img_size()).unwrap();
+                    self.repeat_bbs().unwrap();
                 }
             });
     }
