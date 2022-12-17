@@ -91,11 +91,12 @@ impl Relabeling {
     fn find_next_highlighted(&self) -> Option<usize> {
         let size = self.image_rect.size();
         for (i, old_bbs) in self.old_label.iter().enumerate() {
-            if self
-                .new_label
-                .iter()
-                .all(|new_bbs| !old_bbs.rect(size).contains_rect(new_bbs.rect(size)))
-            {
+            if self.new_label.iter().all(|new_bbs| {
+                let old_rect = old_bbs.rect(size);
+                let new_rect = new_bbs.rect(size);
+                let iou = old_rect.intersect(new_rect).area() / old_rect.union(new_rect).area();
+                iou < 0.95
+            }) {
                 return Some(i);
             }
         }
@@ -187,8 +188,7 @@ impl Relabeling {
             let new_bbs = BoundingBox::from_rect(old_bbx.rect(size), size, new_class);
             self.new_label.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
-            if self.new_label.len() == self.old_label.len() {
-                assert!(self.highlighted.is_none());
+            if self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
                 let (move_old, move_new) = (DatasetMovement::Next, DatasetMovement::Next);
                 self.go(move_old, move_new, ctx);
                 self.repeat_bbs().unwrap();
