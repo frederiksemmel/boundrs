@@ -4,11 +4,25 @@ use glob::glob;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::prelude::*;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+pub trait Label
+where
+    Self: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash,
+{
+    fn color(self) -> Color32;
+    fn shortcuts() -> HashMap<Vec<Key>, Self>
+    where
+        Self: Sized;
+    fn from_usize(i: usize) -> Self;
+    fn to_usize(self) -> usize;
+    fn to_name(self) -> String;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Class {
+pub enum Card {
     A = 0,
     K,
     Q,
@@ -23,10 +37,9 @@ pub enum Class {
     V3,
     V2,
 }
-
-impl Class {
-    pub fn color(self) -> Color32 {
-        use Class::*;
+impl Label for Card {
+    fn color(self) -> Color32 {
+        use Card::*;
         match self {
             A => Color32::from_rgb(0x2f, 0x4f, 0x4f),
             K => Color32::from_rgb(0x8b, 0x45, 0x13),
@@ -44,26 +57,26 @@ impl Class {
         }
     }
 
-    pub fn shortcuts() -> HashMap<Key, Class> {
+    fn shortcuts() -> HashMap<Vec<Key>, Card> {
         let mut map = HashMap::new();
-        map.insert(Key::Num1, Class::A);
-        map.insert(Key::Num2, Class::V2);
-        map.insert(Key::Num3, Class::V3);
-        map.insert(Key::Num4, Class::V4);
-        map.insert(Key::Num5, Class::V5);
-        map.insert(Key::Num6, Class::V6);
-        map.insert(Key::Num7, Class::V7);
-        map.insert(Key::Num8, Class::V8);
-        map.insert(Key::Num9, Class::V9);
-        map.insert(Key::Num0, Class::V10);
-        map.insert(Key::J, Class::J);
-        map.insert(Key::Q, Class::Q);
-        map.insert(Key::K, Class::K);
+        map.insert(vec![Key::Num1], Card::A);
+        map.insert(vec![Key::Num2], Card::V2);
+        map.insert(vec![Key::Num3], Card::V3);
+        map.insert(vec![Key::Num4], Card::V4);
+        map.insert(vec![Key::Num5], Card::V5);
+        map.insert(vec![Key::Num6], Card::V6);
+        map.insert(vec![Key::Num7], Card::V7);
+        map.insert(vec![Key::Num8], Card::V8);
+        map.insert(vec![Key::Num9], Card::V9);
+        map.insert(vec![Key::Num0], Card::V10);
+        map.insert(vec![Key::J], Card::J);
+        map.insert(vec![Key::Q], Card::Q);
+        map.insert(vec![Key::K], Card::K);
         map
     }
 
-    fn from_usize(i: usize) -> Class {
-        use Class::*;
+    fn from_usize(i: usize) -> Card {
+        use Card::*;
         match i {
             0 => A,
             1 => K,
@@ -81,39 +94,158 @@ impl Class {
             _ => unreachable!(),
         }
     }
-
-    pub fn to_name(self) -> &'static str {
-        use Class::*;
+    fn to_usize(self) -> usize {
+        use Card::*;
         match self {
-            A => "A",
-            K => "K",
-            Q => "Q",
-            J => "J",
-            V10 => "10",
-            V9 => "9",
-            V8 => "8",
-            V7 => "7",
-            V6 => "6",
-            V5 => "5",
-            V4 => "4",
-            V3 => "3",
-            V2 => "2",
+            A => 0,
+            K => 1,
+            Q => 2,
+            J => 3,
+            V10 => 4,
+            V9 => 5,
+            V8 => 6,
+            V7 => 7,
+            V6 => 8,
+            V5 => 9,
+            V4 => 10,
+            V3 => 11,
+            V2 => 12,
+        }
+    }
+
+    fn to_name(self) -> String {
+        use Card::*;
+        match self {
+            A => "A".into(),
+            K => "K".into(),
+            Q => "Q".into(),
+            J => "J".into(),
+            V10 => "10".into(),
+            V9 => "9".into(),
+            V8 => "8".into(),
+            V7 => "7".into(),
+            V6 => "6".into(),
+            V5 => "5".into(),
+            V4 => "4".into(),
+            V3 => "3".into(),
+            V2 => "2".into(),
         }
     }
 }
 
-pub type YoloLabel = Vec<YoloBB>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Suit {
+    Hearts = 0,
+    Diamonds,
+    Clubs,
+    Spades,
+}
+
+impl Label for Suit {
+    fn color(self) -> Color32 {
+        use Suit::*;
+        match self {
+            Hearts => Color32::from_rgb(0x2f, 0x4f, 0x4f),
+            Diamonds => Color32::from_rgb(0x8b, 0x45, 0x13),
+            Clubs => Color32::from_rgb(0x00, 0x80, 0x00),
+            Spades => Color32::from_rgb(0x4b, 0x00, 0x82),
+        }
+    }
+
+    fn shortcuts() -> HashMap<Vec<Key>, Suit> {
+        use Suit::*;
+        let mut map = HashMap::new();
+        map.insert(vec![Key::H], Hearts);
+        map.insert(vec![Key::D], Diamonds);
+        map.insert(vec![Key::C], Clubs);
+        map.insert(vec![Key::S], Spades);
+        map
+    }
+    fn from_usize(i: usize) -> Suit {
+        use Suit::*;
+        // println!("suit from {i}");
+        match i {
+            0 => Hearts,
+            1 => Diamonds,
+            2 => Clubs,
+            3 => Spades,
+            _ => unreachable!(),
+        }
+    }
+    fn to_usize(self) -> usize {
+        use Suit::*;
+        match self {
+            Hearts => 0,
+            Diamonds => 1,
+            Clubs => 2,
+            Spades => 3,
+        }
+    }
+    fn to_name(self) -> String {
+        use Suit::*;
+        match self {
+            Hearts => "H".into(),
+            Diamonds => "D".into(),
+            Clubs => "C".into(),
+            Spades => "S".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CardSuit(pub Card, pub Suit);
+
+impl Label for CardSuit {
+    fn color(self) -> Color32 {
+        self.0.color()
+    }
+    fn shortcuts() -> HashMap<Vec<Key>, CardSuit> {
+        let card_shortcuts = Card::shortcuts();
+        let suit_shortcuts = Suit::shortcuts();
+        let mut shortcuts = HashMap::new();
+        for (cs, card) in card_shortcuts.iter() {
+            for (ss, suit) in suit_shortcuts.iter() {
+                let mut shortcut = ss.clone();
+                shortcut.append(&mut cs.clone());
+                shortcuts.insert(shortcut, CardSuit(*card, *suit));
+            }
+        }
+        shortcuts
+    }
+    fn from_usize(i: usize) -> CardSuit {
+        // println!("CardSuit from usize {i}");
+        let suit_usize = i / 13;
+        let card_usize = i % 13;
+        let suit = Suit::from_usize(suit_usize);
+        let card = Card::from_usize(card_usize);
+        CardSuit(card, suit)
+    }
+    // TODO fucking unit test generically
+    fn to_usize(self) -> usize {
+        let (card, suit) = (self.0, self.1);
+        let card_usize = card.to_usize();
+        let suit_usize = suit.to_usize();
+        13 * suit_usize + card_usize
+    }
+    fn to_name(self) -> String {
+        let (card, suit) = (self.0, self.1);
+        format!("{}{}", card.to_name(), suit.to_name())
+    }
+}
+
+pub type YoloLabel<L> = Vec<YoloBB<L>>;
 
 #[derive(Debug, Clone, Copy)]
-pub struct YoloBB {
+pub struct YoloBB<L: Label> {
     class_num: usize,
     x: f32,
     y: f32,
     w: f32,
     h: f32,
+    label: PhantomData<L>,
 }
 
-impl FromStr for YoloBB {
+impl<L: Label> FromStr for YoloBB<L> {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -127,11 +259,12 @@ impl FromStr for YoloBB {
             y,
             w,
             h,
+            label: PhantomData::default(),
         })
     }
 }
 
-impl YoloBB {
+impl<L: Label> YoloBB<L> {
     fn as_string(self) -> String {
         format!(
             "{} {} {} {} {}",
@@ -140,13 +273,13 @@ impl YoloBB {
     }
 }
 
-pub trait BoundingBox {
+pub trait BoundingBox<L: Label> {
     fn rect(&self, size: Vec2) -> Rect;
-    fn class(&self) -> Class;
-    fn from_rect(rect: Rect, size: Vec2, class: Class) -> Self;
+    fn class(&self) -> L;
+    fn from_rect(rect: Rect, size: Vec2, class: L) -> Self;
 }
 
-impl BoundingBox for YoloBB {
+impl<L: Label> BoundingBox<L> for YoloBB<L> {
     fn rect(&self, size: Vec2) -> Rect {
         let img_w = size.x as f32;
         let img_h = size.y as f32;
@@ -156,10 +289,10 @@ impl BoundingBox for YoloBB {
             [yl.w * img_w, yl.h * img_h].into(),
         )
     }
-    fn class(&self) -> Class {
-        Class::from_usize(self.class_num)
+    fn class(&self) -> L {
+        L::from_usize(self.class_num)
     }
-    fn from_rect(rect: Rect, size: Vec2, class: Class) -> Self {
+    fn from_rect(rect: Rect, size: Vec2, class: L) -> Self {
         let img_w = size.x as f32;
         let img_h = size.y as f32;
         let center = rect.center();
@@ -168,21 +301,23 @@ impl BoundingBox for YoloBB {
         let size = rect.size();
         let w = size.x as f32 / img_w;
         let h = size.y as f32 / img_h;
-        let class_num = class as usize;
+        let class_num = class.to_usize();
         YoloBB {
             class_num,
             x,
             y,
             w,
             h,
+            label: PhantomData::default(),
         }
     }
 }
 
 #[derive(Debug)]
-struct Datapoint {
+struct Datapoint<L: Label> {
     img_src: PathBuf,
     label_src: PathBuf,
+    label: PhantomData<L>,
 }
 
 fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
@@ -193,18 +328,22 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
     Ok(ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()))
 }
 
-impl Datapoint {
+impl<L: Label> Datapoint<L> {
     fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
         let img_filename = img_src.file_name().unwrap();
         let mut label_src = labels_dir;
         label_src.push(img_filename);
         label_src.set_extension("txt");
-        Datapoint { img_src, label_src }
+        Datapoint::<L> {
+            img_src,
+            label_src,
+            label: PhantomData::default(),
+        }
     }
     fn load_image(&self) -> Result<ColorImage> {
         load_image_from_path(&self.img_src)
     }
-    fn load_label(&self) -> Result<YoloLabel> {
+    fn load_label(&self) -> Result<YoloLabel<L>> {
         if !self.label_src.exists() {
             File::create(&self.label_src).unwrap();
         }
@@ -217,7 +356,7 @@ impl Datapoint {
         }
         Ok(labels)
     }
-    fn save_label(&self, label: YoloLabel) -> Result<()> {
+    fn save_label(&self, label: YoloLabel<L>) -> Result<()> {
         let mut file = File::create(&self.label_src)?;
         for yolo_label in label {
             writeln!(file, "{}", yolo_label.as_string())?;
@@ -230,19 +369,20 @@ impl Datapoint {
     }
 }
 
-pub enum DatasetMovement<'c> {
+#[derive(Clone, Copy, PartialEq)]
+pub enum DatasetMovement<'c, L: Label> {
     Next,
     Previous,
-    NextContaining(&'c HashSet<Class>),
-    PreviousContaining(&'c HashSet<Class>),
+    NextContaining(&'c HashSet<L>),
+    PreviousContaining(&'c HashSet<L>),
 }
 
-pub struct Dataset {
-    data: Vec<Datapoint>,
+pub struct Dataset<L: Label> {
+    data: Vec<Datapoint<L>>,
     i: usize,
 }
 
-impl Dataset {
+impl<L: Label> Dataset<L> {
     pub fn from_input_dir() -> Result<Self> {
         let mut data = vec![];
         let labels_dir = PathBuf::from("./input");
@@ -266,14 +406,23 @@ impl Dataset {
             i: first_no_label,
         })
     }
+    pub fn with_label_prefix(prefix: &str) -> Result<Self> {
+        let mut dataset = Dataset::from_input_dir()?;
+        for mut datapoint in &mut dataset.data {
+            let label_name = datapoint.label_src.file_name().unwrap().to_str().unwrap();
+            let label_prefix_name = format!("{}{}", prefix, label_name);
+            datapoint.label_src = datapoint.label_src.with_file_name(label_prefix_name);
+        }
+        Ok(dataset)
+    }
 
     pub fn current_image(&self) -> Result<ColorImage> {
         self.data[self.i].load_image()
     }
-    pub fn current_label(&self) -> Result<YoloLabel> {
+    pub fn current_label(&self) -> Result<YoloLabel<L>> {
         self.data[self.i].load_label()
     }
-    pub fn previous_label(&self) -> Result<YoloLabel> {
+    pub fn previous_label(&self) -> Result<YoloLabel<L>> {
         let previous = self.i.saturating_sub(1);
         self.data[previous].load_label()
     }
@@ -283,7 +432,7 @@ impl Dataset {
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
     }
-    fn save_label(&self, label: YoloLabel) -> Result<()> {
+    fn save_label(&self, label: YoloLabel<L>) -> Result<()> {
         self.data[self.i].save_label(label)
     }
     fn next(&mut self) -> Result<()> {
@@ -294,7 +443,7 @@ impl Dataset {
         self.i = self.i.saturating_sub(1);
         Ok(())
     }
-    fn next_containing(&mut self, classes: &HashSet<Class>) -> Result<()> {
+    fn next_containing(&mut self, classes: &HashSet<L>) -> Result<()> {
         while self.i < self.data.len() - 1 {
             self.i += 1;
             let label = self.data[self.i].load_label()?;
@@ -304,7 +453,7 @@ impl Dataset {
         }
         Ok(())
     }
-    fn previous_containing(&mut self, classes: &HashSet<Class>) -> Result<()> {
+    fn previous_containing(&mut self, classes: &HashSet<L>) -> Result<()> {
         while self.i > 0 {
             self.i -= 1;
             let label = self.data[self.i].load_label()?;
@@ -315,7 +464,7 @@ impl Dataset {
         Ok(())
     }
 
-    pub fn go(&mut self, movement: DatasetMovement, label: YoloLabel) -> Result<()> {
+    pub fn go(&mut self, movement: DatasetMovement<L>, label: YoloLabel<L>) -> Result<()> {
         self.save_label(label)?;
         match movement {
             DatasetMovement::Next => self.next(),

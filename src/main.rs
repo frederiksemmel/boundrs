@@ -4,8 +4,11 @@ use egui::*;
 use std::collections::HashSet;
 
 mod dataset;
-use dataset::{BoundingBox, Class, Dataset, DatasetMovement, YoloBB, YoloLabel};
+use dataset::{BoundingBox, Card, Dataset, DatasetMovement, Label, YoloBB, YoloLabel};
 use image::{Rgba, RgbaImage};
+
+mod relabeling;
+use relabeling::Relabeling;
 
 fn main() {
     let options = eframe::NativeOptions {
@@ -16,8 +19,14 @@ fn main() {
     eframe::run_native(
         "Show an image with eframe/egui",
         options,
-        Box::new(|cc| Box::new(MyApp::new(cc))),
+        Box::new(|cc| Box::new(Relabeling::new(cc))),
     );
+
+    // eframe::run_native(
+    //     "Show an image with eframe/egui",
+    //     options,
+    //     Box::new(|cc| Box::new(Boundrs::new(cc))),
+    // );
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,20 +36,20 @@ enum BBoxInput {
     Finished(Pos2, Pos2),
 }
 
-struct MyApp {
+struct Boundrs {
     image_texture: egui::TextureHandle,
     mask_texture: egui::TextureHandle,
     bbox_input: BBoxInput,
-    dataset: Dataset,
-    current_class: Class,
+    dataset: Dataset<Card>,
+    current_class: Card,
     image_rect: Rect,
     filter: bool,
     filter_opacity: u8,
-    shown_classes: HashSet<Class>,
-    current_label: YoloLabel,
+    shown_classes: HashSet<Card>,
+    current_label: YoloLabel<Card>,
 }
 
-impl MyApp {
+impl Boundrs {
     // TODO error handling
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let dataset = Dataset::from_input_dir().unwrap();
@@ -62,7 +71,7 @@ impl MyApp {
             mask_texture,
             bbox_input: BBoxInput::None,
             dataset: Dataset::from_input_dir().unwrap(),
-            current_class: Class::V2,
+            current_class: Card::V2,
             image_rect: Rect::NOTHING,
             filter: false,
             filter_opacity,
@@ -72,12 +81,12 @@ impl MyApp {
     }
 }
 
-fn pos_inside_label_box(label: &YoloLabel, pos: Pos2, size: Vec2) -> bool {
+fn pos_inside_label_box(label: &YoloLabel<Card>, pos: Pos2, size: Vec2) -> bool {
     label.iter().any(|l| l.rect(size).contains(pos))
 }
 fn generate_mask(
-    label: &YoloLabel,
-    shown_classes: &HashSet<Class>,
+    label: &YoloLabel<Card>,
+    shown_classes: &HashSet<Card>,
     size: Vec2,
     opacity: u8,
 ) -> ColorImage {
@@ -100,7 +109,7 @@ fn generate_mask(
     ColorImage::from_rgba_unmultiplied([width, height], pixels.as_slice())
 }
 
-impl MyApp {
+impl Boundrs {
     fn to_img_coordinates(&self, pos: Pos2) -> Pos2 {
         (pos - self.image_rect.left_top()).to_pos2()
     }
@@ -113,7 +122,7 @@ impl MyApp {
         self.current_label
             .retain(|label| !label.rect(size).contains(pos));
     }
-    pub fn add_bb(&mut self, bb: YoloBB) {
+    pub fn add_bb(&mut self, bb: YoloBB<Card>) {
         self.current_label.push(bb)
     }
 
@@ -170,7 +179,7 @@ impl MyApp {
             }
         };
     }
-    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: Class) {
+    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: Card) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
             Rounding::none(),
@@ -232,10 +241,10 @@ impl MyApp {
         self.mask_texture = ctx.load_texture("mask", mask, egui::TextureFilter::Linear);
     }
 
-    fn classes_pressed(&self, ctx: &Context) -> HashSet<Class> {
+    fn classes_pressed(&self, ctx: &Context) -> HashSet<Card> {
         let mut classes = HashSet::new();
-        for (key, class) in Class::shortcuts() {
-            if ctx.input().key_pressed(key) {
+        for (keys, class) in Card::shortcuts() {
+            if keys.iter().all(|key| ctx.input().key_pressed(*key)) {
                 classes.insert(class);
             }
         }
@@ -278,7 +287,7 @@ impl MyApp {
     }
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for Boundrs {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
             let filename = self.dataset.current_name();
