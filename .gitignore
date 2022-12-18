@@ -1,7 +1,8 @@
 /target
 
-input
-input_backup
+**.jpg
+**.txt
+*.zip
 flamegraph.svg
 perf.data
 perf.data.old
