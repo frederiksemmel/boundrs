@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::{Parser, Subcommand};
 use eframe::egui;
 use egui::*;
 use std::collections::HashSet;
@@ -10,23 +11,34 @@ use image::{Rgba, RgbaImage};
 mod relabeling;
 use relabeling::Relabeling;
 
+#[derive(Subcommand)]
+enum Mode {
+    Label,
+    Relabel,
+}
+
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli {
+    #[command(subcommand)]
+    mode: Mode,
+}
+
+// Here is a simplified version of the code:
+
 fn main() {
+    let cli = Cli::parse();
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(1920.0, 1080.0)),
         ..Default::default()
     };
 
-    eframe::run_native(
-        "Show an image with eframe/egui",
-        options,
-        Box::new(|cc| Box::new(Relabeling::new(cc))),
-    );
+    let app = match cli.mode {
+        Mode::Label => Box::new(Boundrs::build_app) as eframe::AppCreator,
+        Mode::Relabel => Box::new(Relabeling::build_app) as eframe::AppCreator,
+    };
 
-    // eframe::run_native(
-    //     "Show an image with eframe/egui",
-    //     options,
-    //     Box::new(|cc| Box::new(Boundrs::new(cc))),
-    // );
+    eframe::run_native("Show an image with eframe/egui", options, app);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,7 +63,7 @@ struct Boundrs {
 
 impl Boundrs {
     // TODO error handling
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn build_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
         let dataset = Dataset::from_input_dir().unwrap();
         let image = dataset.current_image().unwrap();
         let image_texture =
@@ -66,7 +78,7 @@ impl Boundrs {
             .egui_ctx
             .load_texture("mask", mask, egui::TextureFilter::Linear);
 
-        Self {
+        Box::new(Self {
             image_texture,
             mask_texture,
             bbox_input: BBoxInput::None,
@@ -77,7 +89,7 @@ impl Boundrs {
             filter_opacity,
             shown_classes,
             current_label: current_bbs,
-        }
+        })
     }
 }
 
@@ -232,13 +244,15 @@ impl Boundrs {
         self.image_texture = ctx.load_texture("my-image", image, egui::TextureFilter::Linear);
     }
     fn update_mask(&mut self, ctx: &Context) {
-        let mask = generate_mask(
-            &self.current_label,
-            &self.shown_classes,
-            self.image_texture.size_vec2(),
-            self.filter_opacity,
-        );
-        self.mask_texture = ctx.load_texture("mask", mask, egui::TextureFilter::Linear);
+        if self.filter {
+            let mask = generate_mask(
+                &self.current_label,
+                &self.shown_classes,
+                self.image_texture.size_vec2(),
+                self.filter_opacity,
+            );
+            self.mask_texture = ctx.load_texture("mask", mask, egui::TextureFilter::Linear);
+        }
     }
 
     fn classes_pressed(&self, ctx: &Context) -> HashSet<Card> {

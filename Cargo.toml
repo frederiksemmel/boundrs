@@ -13,3 +13,4 @@ palette = "*"
 alphanumeric-sort = "*"
 glob = "*"
 anyhow = "*"
+clap = { version = "4.0.29", features = ["derive"] }

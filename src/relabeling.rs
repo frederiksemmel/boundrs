@@ -20,7 +20,7 @@ pub struct Relabeling {
 }
 
 impl Relabeling {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn build_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
         let old_dataset = Dataset::from_input_dir().unwrap();
         let new_dataset = Dataset::with_label_prefix("new_").unwrap();
         let image = old_dataset.current_image().unwrap();
@@ -40,7 +40,7 @@ impl Relabeling {
             new_label,
         };
         relabeling.highlighted = relabeling.find_next_highlighted();
-        relabeling
+        Box::new(relabeling)
     }
     fn to_screen_coordinates(&self, pos: Pos2) -> Pos2 {
         pos + self.image_rect.left_top().to_vec2()
